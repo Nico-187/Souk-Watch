@@ -58,7 +58,7 @@ SOUK_URLS = [
     ("https://www.parfumo.com/Souks/Offers/Samples",  "Proben"),
 ]
 
-LOGIN_URL  = "https://www.parfumo.com/action/dologin"
+LOGIN_URL  = "https://www.parfumo.com/board/login.php"
 BASE_URL   = "https://www.parfumo.com"
 
 
@@ -79,19 +79,27 @@ def save_seen_items(items: set):
         json.dump(list(items), f)
 
 
+def header_safe(text: str) -> str:
+    """
+    HTTP-Header dürfen nur Latin-1 enthalten (kein Emoji, keine exotischen Zeichen).
+    Umlaute (ä/ö/ü) bleiben erhalten, nicht darstellbares (z.B. 🧴) wird entfernt.
+    """
+    return text.encode("latin-1", "ignore").decode("latin-1").strip()
+
+
 def send_ntfy(title: str, message: str, url: str, priority: str = "default"):
     if not NTFY_TOPIC:
-        print("[WARN] Ntfy nicht konfiguriert.")
+        print("[WARN] Ntfy nicht konfiguriert – kein Push (nur Konsole).")
         return
     try:
         r = requests.post(
             f"https://ntfy.sh/{NTFY_TOPIC}",
-            data=message.encode("utf-8"),
+            data=message.encode("utf-8"),       # Body darf UTF-8 (Emoji ok)
             headers={
-                "Title":    title,
-                "Priority": priority,   # urgent, high, default, low, min
+                "Title":    header_safe(title), # Header nur Latin-1 (kein Emoji)
+                "Priority": priority,           # urgent, high, default, low, min
                 "Tags":     "perfume",
-                "Click":    url,        # Beim Tippen direkt zum Angebot
+                "Click":    url,                # Beim Tippen direkt zum Angebot
             },
             timeout=10,
         )
@@ -114,20 +122,11 @@ HEADERS = {
 
 def is_logged_in(html: str) -> bool:
     """
-    Prüft anhand des Seiten-HTML, ob wir wirklich eingeloggt sind.
-    Eingeloggte Seiten zeigen einen Logout-/Abmelden-Link, ausgeloggte ein Login-Formular.
+    Prüft anhand des Seiten-HTML, ob wir eingeloggt sind.
+    Eingeloggt zeigt Parfumo (phpBB-Board) einen Logout-Link 'mode=logout';
+    ausgeloggt fehlt dieser komplett (verifiziert gegen die echte Seite).
     """
-    low = html.lower()
-    # Positive Indikatoren: nur eingeloggt sichtbar
-    logged_in_markers = ["/action/logout", "logout", "abmelden", "mein profil", "my profile"]
-    # Negative Indikatoren: nur ausgeloggt sichtbar (Login-Formular)
-    logged_out_markers = ["user_password", "dologin", 'name="user_email"']
-
-    has_login_marker  = any(m in low for m in logged_in_markers)
-    has_logout_form   = any(m in low for m in logged_out_markers)
-
-    # Eingeloggt = Logout-Link vorhanden UND kein Login-Formular mehr
-    return has_login_marker and not has_logout_form
+    return "mode=logout" in html.lower()
 
 
 def login(session: requests.Session) -> bool:
@@ -135,27 +134,39 @@ def login(session: requests.Session) -> bool:
         print("[INFO] Kein Login konfiguriert – ohne Login scrapen.")
         return False
     try:
-        # Erst Startseite laden (Cookie holen)
+        # Erst Startseite laden (Session-Cookie holen)
         session.get(BASE_URL, timeout=15)
+
+        # Echte Parfumo-Login-Felder (Board-Login /board/login.php)
         payload = {
-            "user_email":    PARFUMO_USER,
-            "user_password": PARFUMO_PASS,
-            "remember_me":   "1",
+            "username":  PARFUMO_USER,
+            "password":  PARFUMO_PASS,
+            "autologin": "1",
+            "login":     "Login",
+            "redirect":  "index.php",
         }
         r = session.post(LOGIN_URL, data=payload, timeout=15, allow_redirects=True)
         if r.status_code >= 400:
             print(f"[WARN] Login-Request fehlgeschlagen (HTTP {r.status_code}).")
             return False
 
-        # Erfolg NICHT an status_code 200 festmachen (fast immer wahr),
-        # sondern eine frische Seite laden und auf eingeloggten Zustand prüfen.
+        # Eindeutige Fehlermeldungen des Boards abfangen
+        low = r.text.lower()
+        if any(err in low for err in ["incorrect password", "ungültige", "ungueltige",
+                                      "wrong password", "not been able"]):
+            print("[WARN] Login fehlgeschlagen – Zugangsdaten falsch "
+                  "(PARFUMO_USER = Parfumo-Benutzername/E-Mail, PARFUMO_PASS = Passwort). "
+                  "Es wird ohne Login weitergemacht.")
+            return False
+
+        # Erfolg verifizieren: frische Seite laden und auf Logout-Link prüfen
         check = session.get(BASE_URL, timeout=15)
-        if is_logged_in(check.text):
+        if is_logged_in(check.text) or is_logged_in(r.text):
             print("[OK] Login erfolgreich.")
             return True
 
-        print("[WARN] Login fehlgeschlagen – E-Mail/Passwort prüfen "
-              "(PARFUMO_USER / PARFUMO_PASS). Es wird ohne Login weitergemacht.")
+        print("[WARN] Login nicht bestätigt (kein Logout-Link gefunden). "
+              "Prüfe PARFUMO_USER/PARFUMO_PASS. Es wird ohne Login weitergemacht.")
         return False
     except Exception as e:
         print(f"[ERROR] Login Fehler: {e}")
@@ -358,8 +369,8 @@ def matches_filter(item: dict) -> tuple[bool, str]:
 
 def build_message(item: dict, reason: str, category: str) -> tuple[str, str]:
     price_str = f"{item['price']:.2f}€" if item.get("price") else "Preis unbekannt (Login)"
-    title = f"🧴 {item['text'][:60]}"
-    body  = f"[{category}] {price_str}\n{reason}"
+    title = item["text"][:80]                       # Titel: nur Latin-1-sicherer Text
+    body  = f"🧴 [{category}] {price_str}\n{reason}" # Body darf UTF-8 → Emoji hier
     return title, body
 
 
