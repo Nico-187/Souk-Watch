@@ -60,19 +60,22 @@ python3 scraper.py
 > ⚠️ Die `export`-Zeilen gelten nur für das aktuelle Terminal-Fenster. Schließt du es, musst du sie erneut eingeben.
 
 ### 5. Filter anpassen
-Öffne `scraper.py` in VS Code und ändere oben den Block **FILTER-REGELN**:
+Öffne `scraper.py` in VS Code und ändere oben die **Such-Liste**. Jedes Parfum bekommt
+einen eigenen Höchstpreis und die Art (Flakon oder Abfüllung):
 ```python
-WATCH_KEYWORDS = [
-    "Creed",
-    "Amouage",
-    "Xerjoff",
-    # beliebig erweitern: "Aventus", "Layton", ...
+WATCHLIST = [
+    {"name": "Creed Aventus",           "max_preis": 90, "art": "flakon"},
+    {"name": "Parfums de Marly Layton", "max_preis": 30, "art": "abfüllung"},
+    {"name": "Amouage Interlude Man",   "max_preis": 70, "art": "beides"},
+    # beliebig erweitern …
 ]
-
-PRICE_LIMIT = 80.0        # Höchstpreis in € (0 = aus)
-MIN_FILL_PERCENT = 90     # Mindest-Füllstand in % (0 = aus)
-NOTIFY_ALL_NEW = False    # True = ALLE neuen Angebote melden
 ```
+- **name**: Parfum, Marke oder beides – alle Wörter müssen im Angebot vorkommen.
+- **max_preis**: Höchstpreis in €. `0` = Preis egal (immer melden).
+- **art**: `"flakon"` = nur volle Flakons · `"abfüllung"` = nur Proben/Abfüllungen · `"beides"` = egal.
+
+Treffer = Name passt **und** Art passt **und** Preis ≤ max_preis. Abfüllungen werden also
+nur ausgesiebt, wenn du `"flakon"` verlangst (und umgekehrt).
 
 ---
 
@@ -145,14 +148,14 @@ Lege diese **drei** Secrets an:
 
 ## 🔧 Häufige Fragen
 
-**Preis/Füllstand bleibt leer (`—`)?**
-Login hat nicht geklappt. Prüfe `PARFUMO_USER` / `PARFUMO_PASS`.
+**Preis bleibt leer / „Login fehlgeschlagen"?**
+Login hat nicht geklappt. Prüfe `PARFUMO_USER` (Benutzername **oder** E-Mail) / `PARFUMO_PASS`.
 
 **Zu viele / zu wenige Nachrichten?**
-`WATCH_KEYWORDS` verfeinern, `PRICE_LIMIT` / `MIN_FILL_PERCENT` anpassen.
+`WATCHLIST` anpassen: genauere Namen, niedrigere `max_preis`, oder per `art` auf Flakon/Abfüllung einschränken.
 
 **Zeitplan ändern?**
 In `.github/workflows/watcher.yml` die `cron`-Zeiten (in UTC; deutsche Zeit = UTC+2 im Sommer).
 
 **Mehr Angebote pro Lauf prüfen?**
-Aktuell wird die erste Übersichtsseite (16 Angebote) gelesen – reicht für 3 Checks/Tag.
+Eingeloggt werden die Souk-Seiten für Flakons und Abfüllungen gelesen (je ~16 Angebote) – reicht für 3 Checks/Tag.

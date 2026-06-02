@@ -22,24 +22,26 @@ NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "")  # z.B. "mein-parfumo-watcher-xyz1
 # ──────────────────────────────────────────────
 #  FILTER-REGELN  (hier anpassen!)
 # ──────────────────────────────────────────────
-# Suchbegriffe: Trifft zu wenn Parfum-Name ODER Marke den Begriff enthält (Groß-/Kleinschreibung egal)
-WATCH_KEYWORDS = [
-    "Creed",
-    "Amouage",
-    "Xerjoff",
-    # weitere Marken oder Parfumnamen einfach hinzufügen:
-    # "Aventus",
-    # "Reflection Man",
+# ── DEINE SUCH-LISTE ───────────────────────────────────────────────
+# Jedes gesuchte Parfum mit EIGENEM Höchstpreis (€) und Art.
+# Treffer, wenn der Angebots-Text alle Wörter aus "name" enthält,
+# der Preis <= "max_preis" ist UND die Art passt (Groß-/Kleinschreibung egal).
+#   • "name"      : Parfum, Marke oder beides, z.B. "Amouage Reflection Man".
+#   • "max_preis" : Höchstpreis in €. 0 = Preis egal (immer melden).
+#   • "art"       : "flakon"  = nur volle Flakons (Souk-Kategorie Flakons)
+#                   "abfüllung" = nur Abfüllungen/Proben (Souk-Kategorie Proben)
+#                   "beides"  = egal (Standard, wenn weggelassen)
+WATCHLIST = [
+    {"name": "Creed Aventus",          "max_preis": 90, "art": "flakon"},
+    {"name": "Parfums de Marly Layton","max_preis": 30, "art": "abfüllung"},
+    {"name": "Amouage Interlude Man",  "max_preis": 70, "art": "beides"},
+    # weitere Zeilen einfach ergänzen …
 ]
 
-# Preislimit in Euro: Nur Angebote UNTER diesem Preis werden gemeldet (0 = deaktiviert)
-PRICE_LIMIT = 80.0
+# Wenn der Preis nicht gelesen werden konnte: trotzdem melden? (True = nichts verpassen)
+NOTIFY_IF_PRICE_UNKNOWN = True
 
-# Mindeststfüllstand in Prozent: Nur Angebote mit >= diesem Wert (0 = deaktiviert)
-# Erkennt Angaben wie "95%", "90/100ml", "ca. 9/10", "fast voll" etc.
-MIN_FILL_PERCENT = 90
-
-# Sende ALLE neuen Angebote (auch ohne Filter-Match)?
+# Mit True werden ALLE neuen Angebote gemeldet (ignoriert die Watchlist). Normal: False
 NOTIFY_ALL_NEW = False
 
 # ──────────────────────────────────────────────
@@ -304,58 +306,85 @@ def fetch_item_details(session: requests.Session, item: dict) -> dict:
     return item
 
 
+def _name_matches(name: str, text_lower: str) -> bool:
+    """Alle Wörter aus 'name' müssen im Angebots-Text vorkommen (Reihenfolge egal)."""
+    return all(tok in text_lower for tok in name.lower().split())
+
+
+def _norm_art(s: str) -> str:
+    """Normalisiert eine Art-Angabe auf 'flakon' | 'abfüllung' | 'beides'."""
+    s = (s or "").lower().strip()
+    if s in ("flakon", "flakons", "bottle", "voll"):
+        return "flakon"
+    if s in ("abfüllung", "abfuellung", "abfüllungen", "probe", "proben", "decant", "sample", "samples"):
+        return "abfüllung"
+    return "beides"
+
+
+def category_art(category: str) -> str:
+    """Leitet aus der Souk-Kategorie die Art ab ('' = gemischt/unbekannt)."""
+    c = (category or "").lower()
+    has_flakon = "flakon" in c
+    has_probe  = "probe" in c or "abf" in c
+    if has_flakon and not has_probe:
+        return "flakon"
+    if has_probe and not has_flakon:
+        return "abfüllung"
+    return ""  # z.B. öffentliche Mischseite → Art unbekannt
+
+
 def matches_filter(item: dict) -> tuple[bool, str]:
     """
-    Prüft ob ein Angebot den Filtern entspricht.
+    Prüft ein Angebot gegen die WATCHLIST.
+    Treffer, wenn ein Eintrag namentlich passt, die Art stimmt UND der Preis im Limit liegt.
     Gibt (match, grund) zurück.
     """
     text_lower = item["text"].lower()
     price      = item.get("price")
-    reasons    = []
+    have_art   = item.get("art", "")  # 'flakon' | 'abfüllung' | '' (unbekannt)
+    art_label  = {"flakon": "Flakon", "abfüllung": "Abfüllung"}.get(have_art, "")
+    art_tag    = f" [{art_label}]" if art_label else ""
 
-    # Keyword-Match?
-    keyword_match = any(kw.lower() in text_lower for kw in WATCH_KEYWORDS)
-    if keyword_match:
-        matched_kw = [kw for kw in WATCH_KEYWORDS if kw.lower() in text_lower]
-        reasons.append(f"🔍 Keyword: {', '.join(matched_kw)}")
-
-    # Preis-Match?
-    price_match = False
-    if PRICE_LIMIT > 0 and price is not None and price < PRICE_LIMIT:
-        price_match = True
-        reasons.append(f"💶 Preis: {price:.2f}€ (unter {PRICE_LIMIT:.0f}€)")
-
-    # Füllstand-Filter
-    # Füllstand: strukturiertes Feld (von Detailseite) hat Vorrang vor Freitext
-    fill_pct = item.get("fill_pct")  # gesetzt von fetch_item_details (strukturiert)
+    # Füllstand nur als Info (kein Filter – Abfüllungen sollen durchkommen)
+    fill_pct = item.get("fill_pct")
     if fill_pct is None:
-        # Fallback: Freitext aus Titel/Beschreibung (z.B. wenn kein Login)
         fill_pct = parse_fill_level(item["text"])
-    fill_source = item.get("fill_source", "text")
+    fill_info = f" · 🫙 {fill_pct}%" if fill_pct is not None else ""
 
-    fill_match = False
-    if MIN_FILL_PERCENT > 0:
-        if fill_pct is not None and fill_pct >= MIN_FILL_PERCENT:
-            fill_match = True
-            src_label = "Parfumo-Feld" if fill_source == "structured" else "Freitext"
-            reasons.append(f"🫙 Füllstand: {fill_pct}% (≥{MIN_FILL_PERCENT}%, via {src_label})")
-        elif fill_pct is None:
-            # Füllstand unbekannt → trotzdem durchlassen wenn anderer Filter greift
-            pass
-        else:
-            # Zu wenig gefüllt → blockieren, auch wenn Keyword/Preis passt
-            return False, f"⛔ Füllstand zu niedrig: {fill_pct}% (min. {MIN_FILL_PERCENT}%)"
+    if NOTIFY_ALL_NEW:
+        price_str = f"{price:.2f}€" if price is not None else "Preis unbekannt"
+        return True, f"🔔 Neues Angebot{art_tag} · 💶 {price_str}{fill_info}"
 
-    # TOP-TREFFER: Keyword + Preis + Füllstand
-    if sum([keyword_match, price_match, fill_match]) >= 2:
-        reasons = ["⭐ TOP-TREFFER"] + reasons
+    for entry in WATCHLIST:
+        if not _name_matches(entry["name"], text_lower):
+            continue
 
-    match = keyword_match or price_match or fill_match or NOTIFY_ALL_NEW
-    return match, " | ".join(reasons)
+        # Art prüfen: gewünschte Art muss zur Angebots-Art passen
+        want_art = _norm_art(entry.get("art", "beides"))
+        if want_art != "beides" and have_art and want_art != have_art:
+            continue  # z.B. Flakon gewünscht, aber Angebot ist Abfüllung
+
+        limit = entry.get("max_preis", 0)
+
+        limit_str = "Preis egal" if limit <= 0 else f"≤ {limit:.0f}€"
+
+        # Preis unbekannt → je nach Einstellung melden
+        if price is None:
+            if NOTIFY_IF_PRICE_UNKNOWN:
+                return True, f"🔍 {entry['name']}{art_tag} · 💶 Preis unbekannt ({limit_str}){fill_info}"
+            continue
+
+        # Preis bekannt → Limit prüfen (0 = egal)
+        if limit <= 0 or price <= limit:
+            star = "⭐ " if (limit > 0 and price <= limit * 0.6) else ""
+            return True, f"{star}🔍 {entry['name']}{art_tag} · 💶 {price:.2f}€ ({limit_str}){fill_info}"
+        # Name passt, aber zu teuer → kein Treffer (evtl. greift ein anderer Eintrag)
+
+    return False, ""
 
 
 def build_message(item: dict, reason: str, category: str) -> tuple[str, str]:
-    price_str = f"{item['price']:.2f}€" if item.get("price") else "Preis unbekannt (Login)"
+    price_str = f"{item['price']:.2f}€" if item.get("price") else "Preis unbekannt"
     title = item["text"][:80]                       # Titel: nur Latin-1-sicherer Text
     body  = f"🧴 [{category}] {price_str}\n{reason}" # Body darf UTF-8 → Emoji hier
     return title, body
@@ -393,6 +422,9 @@ def main():
             seen_items.add(item["id"])
             new_count += 1
 
+            # Art (Flakon/Abfüllung) aus der Souk-Kategorie ableiten
+            item["art"] = category_art(category)
+
             # Details laden (Preis) – nur wenn Login vorhanden
             if logged_in:
                 item = fetch_item_details(session, item)
@@ -401,8 +433,8 @@ def main():
             match, reason = matches_filter(item)
             if match:
                 title, body = build_message(item, reason, category)
-                # Top-Treffer = hohe Priorität
-                priority = "high" if "TOP-TREFFER" in reason else "default"
+                # Echtes Schnäppchen (⭐) = hohe Priorität
+                priority = "high" if "⭐" in reason else "default"
                 print(f"  ✅ Match: {item['text']} | {reason}")
                 send_ntfy(title, body, item["url"], priority)
             else:
