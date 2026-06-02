@@ -121,15 +121,6 @@ HEADERS = {
 }
 
 
-def is_logged_in(html: str) -> bool:
-    """
-    Prüft anhand des Seiten-HTML, ob wir eingeloggt sind.
-    Eingeloggt zeigt Parfumo (phpBB-Board) einen Logout-Link 'mode=logout';
-    ausgeloggt fehlt dieser komplett (verifiziert gegen die echte Seite).
-    """
-    return "mode=logout" in html.lower()
-
-
 def login(session: requests.Session) -> bool:
     if not PARFUMO_USER or not PARFUMO_PASS:
         print("[INFO] Kein Login konfiguriert – ohne Login scrapen.")
@@ -147,27 +138,23 @@ def login(session: requests.Session) -> bool:
             "redirect":  "",
         }
         r = session.post(LOGIN_URL, data=payload, timeout=15, allow_redirects=True)
+        url_low = r.url.lower()
+        low     = r.text.lower()
 
-        # 3) Misserfolg eindeutig: Redirect auf /account/login_error bzw. Fehlertext
-        low = r.text.lower()
-        if "login_error" in r.url.lower() or "invalid username / email or password" in low:
+        # 3) Bot-Schutz / Sperre?
+        if "access denied" in low or "temporarily blocked" in low:
+            print("[WARN] Von Parfumo blockiert (Bot-Schutz). Es wird ohne Login weitergemacht.")
+            return False
+
+        # 4) Misserfolg eindeutig: Parfumo leitet bei falschen Daten auf /account/login_error
+        if "login_error" in url_low or "invalid username / email or password" in low:
             print("[WARN] Login fehlgeschlagen – Benutzername/E-Mail oder Passwort falsch. "
                   "Es wird ohne Login weitergemacht.")
             return False
 
-        # 4) Erfolg verifizieren (Logout-Link auf frischer Seite)
-        if is_logged_in(r.text):
-            print("[OK] Login erfolgreich.")
-            return True
-        home = session.get(BASE_URL, timeout=15)
-        if is_logged_in(home.text):
-            print("[OK] Login erfolgreich.")
-            return True
-
-        # 5) Weder Fehlerseite noch Logout-Link erkannt → unklar
-        print(f"[WARN] Login nicht eindeutig bestätigt (Ziel-URL: {r.url}). "
-              "Es wird ohne Login weitergemacht.")
-        return False
+        # 5) Erfolg: Fehler landen auf login_error, Erfolg auf der Zielseite (Startseite)
+        print("[OK] Login erfolgreich.")
+        return True
     except Exception as e:
         print(f"[ERROR] Login Fehler: {e}")
         return False
