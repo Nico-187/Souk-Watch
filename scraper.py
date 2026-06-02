@@ -32,9 +32,7 @@ NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "")  # z.B. "mein-parfumo-watcher-xyz1
 #                   "abfüllung" = nur Abfüllungen/Proben (Souk-Kategorie Proben)
 #                   "beides"  = egal (Standard, wenn weggelassen)
 WATCHLIST = [
-    {"name": "Creed Aventus",          "max_preis": 90, "art": "flakon"},
-    {"name": "Parfums de Marly Layton","max_preis": 30, "art": "abfüllung"},
-    {"name": "Amouage Interlude Man",  "max_preis": 70, "art": "beides"},
+    {"name": "Ajwaa White Musk", "max_preis": 50, "art": "flakon"},
     # weitere Zeilen einfach ergänzen …
 ]
 
