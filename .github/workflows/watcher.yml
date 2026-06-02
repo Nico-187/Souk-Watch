@@ -6,6 +6,11 @@ on:
     - cron: '0 12 * * *'
     - cron: '0 18 * * *'
   workflow_dispatch:
+    inputs:
+      seed:
+        description: 'Seed-Modus: aktuelle Angebote nur merken, NICHT melden (gegen Erst-Schwung)'
+        type: boolean
+        default: false
 
 jobs:
   watch:
@@ -23,13 +28,14 @@ jobs:
           python-version: '3.12'
 
       - name: Abhängigkeiten installieren
-        run: pip install requests beautifulsoup4
+        run: pip install -r requirements.txt
 
       - name: Scraper ausführen
         env:
           PARFUMO_USER: ${{ secrets.PARFUMO_USER }}
           PARFUMO_PASS: ${{ secrets.PARFUMO_PASS }}
           NTFY_TOPIC:   ${{ secrets.NTFY_TOPIC }}
+          SEED:         ${{ github.event.inputs.seed }}
         run: python scraper.py
 
       - name: Seen-Items speichern

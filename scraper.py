@@ -35,9 +35,9 @@ WATCHLIST = [
     {"name": "Pana Dora Moonlight", "max_preis": 0, "art": "flakon", "min_fill": 95,
      "souk_url": "https://www.parfumo.com/s_souk.php?b=pana-dora&p=moonlight&img=1"},
     {"name": "Attar Collection Khaltat Night", "max_preis": 0, "art": "flakon", "min_fill": 95,
-     "souk_url": "https://www.parfumo.com/s_souk.php?b=attar-collection&p=khaltat-night-eau-de-parfum&img=1"},
+     "souk_url": "https://www.parfumo.com/s_souk.php?b=Attar_Collection&p=Khaltat_Night_Eau_de_Parfum&img=1"},
     {"name": "House of Oud Dates Delight", "max_preis": 0, "art": "flakon", "min_fill": 95,
-     "souk_url": "https://www.parfumo.com/s_souk.php?b=the-house-of-oud&p=dates-delight&img=1"},
+     "souk_url": "https://www.parfumo.com/s_souk.php?b=The_House_of_Oud&p=Dates_Delight&img=1"},
     {"name": "Ajwaa White Musk", "max_preis": 0, "art": "flakon", "min_fill": 95,
      "souk_url": "https://www.parfumo.com/s_souk.php?b=ajwaa-perfumes&p=white-musk&img=1"},
 ]
@@ -404,6 +404,11 @@ def build_message(item: dict, name: str) -> tuple[str, str]:
 def main():
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M')}] Parfumo Souk Watcher startet…")
 
+    # Seed-Modus: aktuelle Angebote nur als "bekannt" markieren, NICHT melden
+    seed_mode = os.environ.get("SEED", "").lower() in ("1", "true", "yes", "on")
+    if seed_mode:
+        print("[SEED] Seed-Modus aktiv – aktuelle Angebote werden NICHT gemeldet, nur gemerkt.")
+
     seen_items = load_seen_items()
     session    = requests.Session()
     session.headers.update(HEADERS)
@@ -458,7 +463,10 @@ def main():
             else:
                 print(f"  ⏭  Kein Match: {item['text'][:60]}")
 
-    notify_matches(matches)
+    if seed_mode:
+        print(f"[SEED] {len(matches)} aktuelle Treffer als bekannt markiert – KEINE Nachricht verschickt.")
+    else:
+        notify_matches(matches)
     save_seen_items(seen_items)
     print(f"[DONE] {new_count} neue Angebote verarbeitet, "
           f"{len(matches)} Treffer. Gesamt bekannt: {len(seen_items)}")
