@@ -157,12 +157,45 @@ def login(session: requests.Session) -> bool:
 
 
 def parse_price(text: str) -> float | None:
-    """Extrahiert einen Euro-Preis aus einem String."""
+    """Extrahiert einen Euro-Preis aus einem String (Zahl + €)."""
     import re
     match = re.search(r"(\d+[.,]\d+|\d+)\s*€", text.replace("\xa0", " "))
     if match:
         return float(match.group(1).replace(",", "."))
     return None
+
+
+def _num(s: str) -> float | None:
+    """Wandelt '180' / '180,00' / '1.250,00' / '1.250' in eine Zahl um."""
+    s = s.strip()
+    if "," in s and "." in s:
+        s = s.replace(".", "").replace(",", ".")        # 1.250,00 → 1250.00
+    elif "," in s:
+        s = s.replace(",", ".")                          # 180,00 → 180.00
+    elif s.count(".") == 1 and len(s.rsplit(".", 1)[1]) == 3:
+        s = s.replace(".", "")                            # 1.250 → 1250 (Tausender)
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def parse_price_field(text: str) -> float | None:
+    """
+    Liest den Preis bevorzugt aus dem Parfumo-Feld 'Preisvorstellung'
+    (steht oft OHNE €-Zeichen, z.B. 'Preisvorstellung 180').
+    Fällt auf die allgemeine '<Zahl> €'-Erkennung zurück.
+    """
+    import re
+    t = text.replace("\xa0", " ")
+    m = re.search(r"Preisvorstellung[\s:]*€?\s*([0-9][0-9.,]*[0-9]|[0-9])", t, re.I)
+    if not m:  # englische Oberfläche
+        m = re.search(r"(?:price\s*(?:idea|expectation)|asking\s*price)[\s:]*€?\s*([0-9][0-9.,]*[0-9]|[0-9])", t, re.I)
+    if m:
+        val = _num(m.group(1))
+        if val is not None:
+            return val
+    return parse_price(t)
 
 
 def parse_fill_level(text: str) -> int | None:
@@ -261,13 +294,14 @@ def fetch_item_details(session: requests.Session, item: dict) -> dict:
         soup = BeautifulSoup(r.text, "html.parser")
         full_text = soup.get_text(" ")
 
-        # ── Preis ──────────────────────────────────────────────────────
-        item["price"] = parse_price(full_text)
+        import re
+
+        # ── Preis: zuerst Feld "Preisvorstellung", sonst "<Zahl> €" ─────
+        item["price"] = parse_price_field(full_text)
 
         # ── Füllstand aus strukturiertem Feld ──────────────────────────
         # Parfumo zeigt immer "XX%" als eigene Zeile + "X / Y ml" darunter.
         # Wir suchen zuerst das strukturierte Prozent-Feld, dann ml-Verhältnis.
-        import re
 
         # Methode 1: Explizites Prozent-Feld (z.B. "100%" allein in einer Zeile)
         # Im gerenderten Text erscheint es als isolierter Wert wie "\n100%\n"
