@@ -23,24 +23,29 @@ NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "")  # z.B. "mein-parfumo-watcher-xyz1
 #  FILTER-REGELN  (hier anpassen!)
 # ──────────────────────────────────────────────
 # ── DEINE SUCH-LISTE ───────────────────────────────────────────────
-# Jedes gesuchte Parfum mit EIGENEM Höchstpreis (€) und Art.
-# Treffer, wenn der Angebots-Text alle Wörter aus "name" enthält,
-# der Preis <= "max_preis" ist UND die Art passt (Groß-/Kleinschreibung egal).
-#   • "name"      : Parfum, Marke oder beides, z.B. "Amouage Reflection Man".
-#   • "max_preis" : Höchstpreis in €. 0 = Preis egal (immer melden).
-#   • "art"       : "flakon"  = nur volle Flakons (Souk-Kategorie Flakons)
-#                   "abfüllung" = nur Abfüllungen/Proben (Souk-Kategorie Proben)
-#                   "beides"  = egal (Standard, wenn weggelassen)
+# Jedes gesuchte Parfum als eigener Eintrag:
+#   • "name"      : alle Wörter müssen im Angebots-Text vorkommen (Marke+Parfum).
+#   • "max_preis" : Höchstpreis in €. 0 = Preis egal.
+#   • "art"       : "flakon" | "abfüllung" | "beides".
+#   • "min_fill"  : Mindest-Füllmenge in %. 0 = egal.
+#   • "souk_url"  : (optional) direkte Souk-Seite des Parfums → zuverlässiger.
 WATCHLIST = [
-    {"name": "Ajwaa White Musk", "max_preis": 50, "art": "flakon",
+    {"name": "Pana Dora Oud Republic", "max_preis": 0, "art": "flakon", "min_fill": 95,
+     "souk_url": "https://www.parfumo.com/s_souk.php?b=pana-dora&p=oud-republic&img=1"},
+    {"name": "Pana Dora Moonlight", "max_preis": 0, "art": "flakon", "min_fill": 95,
+     "souk_url": "https://www.parfumo.com/s_souk.php?b=pana-dora&p=moonlight&img=1"},
+    {"name": "Attar Collection Khaltat Night", "max_preis": 0, "art": "flakon", "min_fill": 95,
+     "souk_url": "https://www.parfumo.com/s_souk.php?b=attar-collection&p=khaltat-night-eau-de-parfum&img=1"},
+    {"name": "House of Oud Dates Delight", "max_preis": 0, "art": "flakon", "min_fill": 95,
+     "souk_url": "https://www.parfumo.com/s_souk.php?b=the-house-of-oud&p=dates-delight&img=1"},
+    {"name": "Ajwaa White Musk", "max_preis": 0, "art": "flakon", "min_fill": 95,
      "souk_url": "https://www.parfumo.com/s_souk.php?b=ajwaa-perfumes&p=white-musk&img=1"},
-    # weitere Zeilen einfach ergänzen …
-    # Tipp: "souk_url" ist optional – die direkte Souk-Seite des Parfums macht den
-    # Watcher zuverlässiger (findet das Parfum auch abseits der ersten Übersichtsseite).
 ]
 
-# Wenn der Preis nicht gelesen werden konnte: trotzdem melden? (True = nichts verpassen)
+# Preis nicht lesbar → trotzdem melden? (Preis egal, daher True empfohlen)
 NOTIFY_IF_PRICE_UNKNOWN = True
+# Füllmenge nicht lesbar → trotzdem melden? (True = nichts verpassen, Hinweis "unbekannt")
+NOTIFY_IF_FILL_UNKNOWN = True
 
 # Mit True werden ALLE neuen Angebote gemeldet (ignoriert die Watchlist). Normal: False
 NOTIFY_ALL_NEW = False
@@ -87,13 +92,12 @@ def send_ntfy(title: str, message: str, url: str, priority: str = "default"):
     try:
         r = requests.post(
             f"https://ntfy.sh/{NTFY_TOPIC}",
-            data=message.encode("utf-8"),       # Body darf UTF-8 (Emoji ok)
+            data=message.encode("utf-8"),       # Body als UTF-8
             headers={
-                "Title":    header_safe(title), # Header nur Latin-1 (kein Emoji)
+                "Title":    header_safe(title), # Header nur Latin-1
                 "Priority": priority,           # urgent, high, default, low, min
-                "Tags":     "perfume",
                 "Click":    url,                # Beim Tippen direkt zum Angebot
-            },
+            },                                  # (kein Tags-Header → keine Emojis)
             timeout=10,
         )
         r.raise_for_status()
@@ -333,61 +337,64 @@ def detect_art_from_text(text: str) -> str:
     return ""
 
 
-def matches_filter(item: dict) -> tuple[bool, str]:
+def _entry_check(item: dict, entry: dict) -> tuple[str | None, str]:
     """
-    Prüft ein Angebot gegen die WATCHLIST.
-    Treffer, wenn ein Eintrag namentlich passt, die Art stimmt UND der Preis im Limit liegt.
-    Gibt (match, grund) zurück.
+    Prüft Art, Füllmenge und Preis eines Angebots gegen EINEN Watchlist-Eintrag
+    (ohne Namensprüfung – die macht der Aufrufer bzw. entfällt bei souk_url-Seiten).
+    Gibt (treffer_name | None, log_grund) zurück.
     """
-    text_lower = item["text"].lower()
-    price      = item.get("price")
-    have_art   = item.get("art", "")  # 'flakon' | 'abfüllung' | '' (unbekannt)
-    art_label  = {"flakon": "Flakon", "abfüllung": "Abfüllung"}.get(have_art, "")
-    art_tag    = f" [{art_label}]" if art_label else ""
+    # Art
+    want_art = _norm_art(entry.get("art", "beides"))
+    have_art = item.get("art", "")
+    if want_art != "beides" and have_art and want_art != have_art:
+        return None, ""
 
-    # Füllstand nur als Info (kein Filter – Abfüllungen sollen durchkommen)
+    # Füllmenge
     fill_pct = item.get("fill_pct")
     if fill_pct is None:
         fill_pct = parse_fill_level(item["text"])
-    fill_info = f" · 🫙 {fill_pct}%" if fill_pct is not None else ""
+    min_fill = entry.get("min_fill", 0)
+    if min_fill > 0:
+        if fill_pct is None:
+            if not NOTIFY_IF_FILL_UNKNOWN:
+                return None, ""
+        elif fill_pct < min_fill:
+            return None, ""  # zu wenig voll
 
+    # Preis
+    price = item.get("price")
+    limit = entry.get("max_preis", 0)
+    if limit > 0 and price is not None and price > limit:
+        return None, ""
+    if price is None and limit > 0 and not NOTIFY_IF_PRICE_UNKNOWN:
+        return None, ""
+
+    fill_str  = f"{fill_pct}%" if fill_pct is not None else "Füllmenge unbekannt"
+    price_str = f"{price:.2f}€" if price is not None else "Preis unbekannt"
+    return entry["name"], f"{entry['name']} · {fill_str} · {price_str}"
+
+
+def matches_filter(item: dict) -> tuple[str | None, str]:
+    """Prüft ein Angebot gegen die GESAMTE Watchlist (Name muss passen)."""
     if NOTIFY_ALL_NEW:
-        price_str = f"{price:.2f}€" if price is not None else "Preis unbekannt"
-        return True, f"🔔 Neues Angebot{art_tag} · 💶 {price_str}{fill_info}"
-
+        return _entry_check(item, {"name": "Neues Angebot", "art": "beides"})
+    text_lower = item["text"].lower()
     for entry in WATCHLIST:
         if not _name_matches(entry["name"], text_lower):
             continue
-
-        # Art prüfen: gewünschte Art muss zur Angebots-Art passen
-        want_art = _norm_art(entry.get("art", "beides"))
-        if want_art != "beides" and have_art and want_art != have_art:
-            continue  # z.B. Flakon gewünscht, aber Angebot ist Abfüllung
-
-        limit = entry.get("max_preis", 0)
-
-        limit_str = "Preis egal" if limit <= 0 else f"≤ {limit:.0f}€"
-
-        # Preis unbekannt → je nach Einstellung melden
-        if price is None:
-            if NOTIFY_IF_PRICE_UNKNOWN:
-                return True, f"🔍 {entry['name']}{art_tag} · 💶 Preis unbekannt ({limit_str}){fill_info}"
-            continue
-
-        # Preis bekannt → Limit prüfen (0 = egal)
-        if limit <= 0 or price <= limit:
-            star = "⭐ " if (limit > 0 and price <= limit * 0.6) else ""
-            return True, f"{star}🔍 {entry['name']}{art_tag} · 💶 {price:.2f}€ ({limit_str}){fill_info}"
-        # Name passt, aber zu teuer → kein Treffer (evtl. greift ein anderer Eintrag)
-
-    return False, ""
+        name, reason = _entry_check(item, entry)
+        if name:
+            return name, reason
+    return None, ""
 
 
-def build_message(item: dict, reason: str, category: str) -> tuple[str, str]:
-    price_str = f"{item['price']:.2f}€" if item.get("price") else "Preis unbekannt"
-    title = item["text"][:80]                       # Titel: nur Latin-1-sicherer Text
-    body  = f"🧴 [{category}] {price_str}\n{reason}" # Body darf UTF-8 → Emoji hier
-    return title, body
+def build_message(item: dict, name: str) -> tuple[str, str]:
+    """Minimalistische ntfy-Nachricht: Parfum · Füllmenge · Preis – keine Emojis."""
+    fill      = item.get("fill_pct")
+    fill_str  = f"{fill}% voll" if fill is not None else "Füllmenge unbekannt"
+    price     = item.get("price")
+    price_str = f"{price:.2f} €".replace(".", ",") if price is not None else "Preis unbekannt"
+    return name, f"{fill_str} · {price_str}"
 
 
 # ──────────────────────────────────────────────
@@ -405,18 +412,22 @@ def main():
     new_count = 0
 
     # Quellen: eingeloggt die Offers-Seiten, sonst die öffentliche Übersicht …
+    # entry=None → gegen die ganze Watchlist (Name muss passen);
+    # entry gesetzt → gezielte Souk-Seite eines Parfums (Name schon klar).
     if logged_in:
         sources = [
-            ("https://www.parfumo.com/Souks/Offers/Perfumes", "Flakons"),
-            ("https://www.parfumo.com/Souks/Offers/Samples",  "Proben"),
+            ("https://www.parfumo.com/Souks/Offers/Perfumes", "Flakons", None),
+            ("https://www.parfumo.com/Souks/Offers/Samples",  "Proben",  None),
         ]
     else:
-        sources = [("https://www.parfumo.com/Souks", "Flakons & Proben")]
-    # … plus gezielte Souk-Suchseiten aus der Watchlist (zuverlässiger pro Parfum)
-    sources += [(e["souk_url"], "") for e in WATCHLIST if e.get("souk_url")]
+        sources = [("https://www.parfumo.com/Souks", "Flakons & Proben", None)]
+    sources += [(e["souk_url"], "", e) for e in WATCHLIST if e.get("souk_url")]
 
-    for url, category in sources:
-        print(f"  → Lade {category or 'Watchlist-Suche'}: {url}")
+    matches = []  # (name, item) – am Ende gesammelt verschicken
+
+    for url, category, entry in sources:
+        label = category or (entry["name"] if entry else "Watchlist-Suche")
+        print(f"  → Lade {label}: {url}")
         listings = fetch_listings(session, url)
         print(f"     {len(listings)} Angebote gefunden.")
 
@@ -430,24 +441,46 @@ def main():
             # Art (Flakon/Abfüllung): aus Kategorie, sonst aus dem Angebots-Text
             item["art"] = category_art(category) or detect_art_from_text(item["text"])
 
-            # Details laden (Preis) – nur wenn Login vorhanden
+            # Details laden (Preis/Füllmenge) – nur wenn Login vorhanden
             if logged_in:
                 item = fetch_item_details(session, item)
                 time.sleep(1)  # Höflichkeit gegenüber dem Server
 
-            match, reason = matches_filter(item)
-            if match:
-                label = category or {"flakon": "Flakon", "abfüllung": "Abfüllung"}.get(item["art"], "Souk")
-                title, body = build_message(item, reason, label)
-                # Echtes Schnäppchen (⭐) = hohe Priorität
-                priority = "high" if "⭐" in reason else "default"
-                print(f"  ✅ Match: {item['text']} | {reason}")
-                send_ntfy(title, body, item["url"], priority)
+            # souk_url-Quelle: direkt gegen ihren Eintrag prüfen, sonst ganze Watchlist
+            if entry is not None:
+                name, reason = _entry_check(item, entry)
+            else:
+                name, reason = matches_filter(item)
+
+            if name:
+                print(f"  ✅ Match: {reason}")
+                matches.append((name, item))
             else:
                 print(f"  ⏭  Kein Match: {item['text'][:60]}")
 
+    notify_matches(matches)
     save_seen_items(seen_items)
-    print(f"[DONE] {new_count} neue Angebote verarbeitet. Gesamt bekannt: {len(seen_items)}")
+    print(f"[DONE] {new_count} neue Angebote verarbeitet, "
+          f"{len(matches)} Treffer. Gesamt bekannt: {len(seen_items)}")
+
+
+def notify_matches(matches: list):
+    """Verschickt Treffer: einzeln (1) oder als eine gebündelte Nachricht (mehrere)."""
+    if not matches:
+        return
+    if len(matches) == 1:
+        name, item = matches[0]
+        title, body = build_message(item, name)
+        send_ntfy(title, body, item["url"])
+        return
+    # Mehrere Treffer in einem Lauf → eine kompakte Nachricht (kein Push-Flut)
+    lines = []
+    for name, item in matches:
+        _, body = build_message(item, name)
+        lines.append(f"{name} – {body}")
+    send_ntfy(f"Souk: {len(matches)} Treffer",
+              "\n".join(lines[:20]),
+              "https://www.parfumo.com/Souks")
 
 
 if __name__ == "__main__":
