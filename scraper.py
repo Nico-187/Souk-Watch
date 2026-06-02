@@ -58,9 +58,9 @@ SOUK_URLS = [
     ("https://www.parfumo.com/Souks/Offers/Samples",  "Proben"),
 ]
 
-# phpBB-Login-Formular (enthält die CSRF-Felder creation_time/form_token/sid)
-LOGIN_FORM_URL = "https://www.parfumo.com/board/ucp.php?mode=login"
-BASE_URL       = "https://www.parfumo.com"
+# Login-Endpoint (genau der, an den das Browser-Modal postet – ohne CSRF-Token)
+LOGIN_URL = "https://www.parfumo.com/board/login.php"
+BASE_URL  = "https://www.parfumo.com"
 
 
 # ──────────────────────────────────────────────
@@ -135,61 +135,38 @@ def login(session: requests.Session) -> bool:
         print("[INFO] Kein Login konfiguriert – ohne Login scrapen.")
         return False
     try:
-        from urllib.parse import urljoin
+        # 1) Startseite laden → Session-Cookie holen
+        session.get(BASE_URL, timeout=15)
 
-        # 1) Login-Formular laden → Session-Cookie + CSRF-Felder holen
-        form_page = session.get(LOGIN_FORM_URL, timeout=15)
-        soup = BeautifulSoup(form_page.text, "html.parser")
+        # 2) Direkt an /board/login.php posten (exakt wie das Browser-Modal)
+        payload = {
+            "username":  PARFUMO_USER,
+            "password":  PARFUMO_PASS,
+            "autologin": "checked",
+            "login":     "Login",
+            "redirect":  "",
+        }
+        r = session.post(LOGIN_URL, data=payload, timeout=15, allow_redirects=True)
 
-        # Das Formular finden, dessen action auf den Login zeigt (ucp.php?mode=login)
-        form = None
-        for f in soup.find_all("form"):
-            if f.find("input", attrs={"name": "password"}):
-                form = f
-                break
-        if form is None:
-            print("[WARN] Login-Formular nicht gefunden – evtl. Bot-Schutz/Sperre. "
-                  "Es wird ohne Login weitergemacht.")
-            return False
-
-        # 2) ALLE Felder übernehmen (inkl. versteckter creation_time/form_token/sid)
-        payload = {}
-        for inp in form.find_all("input"):
-            name = inp.get("name")
-            if name:
-                payload[name] = inp.get("value", "")
-
-        # 3) Eigene Zugangsdaten einsetzen
-        payload["username"]  = PARFUMO_USER
-        payload["password"]  = PARFUMO_PASS
-        payload["autologin"] = "1"
-        payload.setdefault("login", "Login")
-
-        action = urljoin(LOGIN_FORM_URL, form.get("action") or LOGIN_FORM_URL)
-        r = session.post(action, data=payload, timeout=15, allow_redirects=True)
-        if r.status_code >= 400:
-            print(f"[WARN] Login-Request fehlgeschlagen (HTTP {r.status_code}).")
-            return False
-
-        # 4) Eindeutige Fehlermeldungen abfangen
+        # 3) Misserfolg eindeutig: Redirect auf /account/login_error bzw. Fehlertext
         low = r.text.lower()
-        if any(err in low for err in ["incorrect password", "ungültige", "ungueltige",
-                                      "wrong password", "invalid username", "not been able"]):
-            print("[WARN] Login fehlgeschlagen – Benutzername/Passwort falsch. "
+        if "login_error" in r.url.lower() or "invalid username / email or password" in low:
+            print("[WARN] Login fehlgeschlagen – Benutzername/E-Mail oder Passwort falsch. "
                   "Es wird ohne Login weitergemacht.")
             return False
 
-        # 5) Erfolg verifizieren: Logout-Link vorhanden?
+        # 4) Erfolg verifizieren (Logout-Link auf frischer Seite)
         if is_logged_in(r.text):
             print("[OK] Login erfolgreich.")
             return True
-        check = session.get(BASE_URL, timeout=15)
-        if is_logged_in(check.text):
+        home = session.get(BASE_URL, timeout=15)
+        if is_logged_in(home.text):
             print("[OK] Login erfolgreich.")
             return True
 
-        print("[WARN] Login nicht bestätigt (kein Logout-Link). "
-              "Prüfe PARFUMO_USER/PARFUMO_PASS. Es wird ohne Login weitergemacht.")
+        # 5) Weder Fehlerseite noch Logout-Link erkannt → unklar
+        print(f"[WARN] Login nicht eindeutig bestätigt (Ziel-URL: {r.url}). "
+              "Es wird ohne Login weitergemacht.")
         return False
     except Exception as e:
         print(f"[ERROR] Login Fehler: {e}")
