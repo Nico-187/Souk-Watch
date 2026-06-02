@@ -32,8 +32,11 @@ NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "")  # z.B. "mein-parfumo-watcher-xyz1
 #                   "abfüllung" = nur Abfüllungen/Proben (Souk-Kategorie Proben)
 #                   "beides"  = egal (Standard, wenn weggelassen)
 WATCHLIST = [
-    {"name": "Ajwaa White Musk", "max_preis": 50, "art": "flakon"},
+    {"name": "Ajwaa White Musk", "max_preis": 50, "art": "flakon",
+     "souk_url": "https://www.parfumo.com/s_souk.php?b=ajwaa-perfumes&p=white-musk&img=1"},
     # weitere Zeilen einfach ergänzen …
+    # Tipp: "souk_url" ist optional – die direkte Souk-Seite des Parfums macht den
+    # Watcher zuverlässiger (findet das Parfum auch abseits der ersten Übersichtsseite).
 ]
 
 # Wenn der Preis nicht gelesen werden konnte: trotzdem melden? (True = nichts verpassen)
@@ -46,17 +49,6 @@ NOTIFY_ALL_NEW = False
 #  DATEIPFADE
 # ──────────────────────────────────────────────
 DATA_FILE = Path("data/seen_items.json")
-
-# ──────────────────────────────────────────────
-#  SOUK URLs
-# ──────────────────────────────────────────────
-SOUK_URLS = [
-    # Öffentliche Übersichtsseite (funktioniert ohne Login)
-    ("https://www.parfumo.com/Souks", "Flakons & Proben"),
-    # Mit Login auch spezifischere Seiten:
-    ("https://www.parfumo.com/Souks/Offers/Perfumes", "Flakons"),
-    ("https://www.parfumo.com/Souks/Offers/Samples",  "Proben"),
-]
 
 # Login-Endpoint (genau der, an den das Browser-Modal postet – ohne CSRF-Token)
 LOGIN_URL = "https://www.parfumo.com/board/login.php"
@@ -331,6 +323,16 @@ def category_art(category: str) -> str:
     return ""  # z.B. öffentliche Mischseite → Art unbekannt
 
 
+def detect_art_from_text(text: str) -> str:
+    """Erkennt die Art am Angebots-Text (Souk zeigt 'Bottle' bzw. 'Sample/Split')."""
+    t = (text or "").lower()
+    if any(w in t for w in ["sample", "split", "decant", "probe", "abfüll", "abfuell"]):
+        return "abfüllung"
+    if any(w in t for w in ["bottle", "flakon"]):
+        return "flakon"
+    return ""
+
+
 def matches_filter(item: dict) -> tuple[bool, str]:
     """
     Prüft ein Angebot gegen die WATCHLIST.
@@ -402,14 +404,19 @@ def main():
 
     new_count = 0
 
-    for url, category in SOUK_URLS:
-        # Mit Login: spezifischere Seiten bevorzugen; ohne Login: nur öffentliche Seite
-        if not logged_in and url != "https://www.parfumo.com/Souks":
-            continue
-        if logged_in and url == "https://www.parfumo.com/Souks":
-            continue  # Mit Login die spezifischen Seiten nutzen
+    # Quellen: eingeloggt die Offers-Seiten, sonst die öffentliche Übersicht …
+    if logged_in:
+        sources = [
+            ("https://www.parfumo.com/Souks/Offers/Perfumes", "Flakons"),
+            ("https://www.parfumo.com/Souks/Offers/Samples",  "Proben"),
+        ]
+    else:
+        sources = [("https://www.parfumo.com/Souks", "Flakons & Proben")]
+    # … plus gezielte Souk-Suchseiten aus der Watchlist (zuverlässiger pro Parfum)
+    sources += [(e["souk_url"], "") for e in WATCHLIST if e.get("souk_url")]
 
-        print(f"  → Lade {category}: {url}")
+    for url, category in sources:
+        print(f"  → Lade {category or 'Watchlist-Suche'}: {url}")
         listings = fetch_listings(session, url)
         print(f"     {len(listings)} Angebote gefunden.")
 
@@ -420,8 +427,8 @@ def main():
             seen_items.add(item["id"])
             new_count += 1
 
-            # Art (Flakon/Abfüllung) aus der Souk-Kategorie ableiten
-            item["art"] = category_art(category)
+            # Art (Flakon/Abfüllung): aus Kategorie, sonst aus dem Angebots-Text
+            item["art"] = category_art(category) or detect_art_from_text(item["text"])
 
             # Details laden (Preis) – nur wenn Login vorhanden
             if logged_in:
@@ -430,7 +437,8 @@ def main():
 
             match, reason = matches_filter(item)
             if match:
-                title, body = build_message(item, reason, category)
+                label = category or {"flakon": "Flakon", "abfüllung": "Abfüllung"}.get(item["art"], "Souk")
+                title, body = build_message(item, reason, label)
                 # Echtes Schnäppchen (⭐) = hohe Priorität
                 priority = "high" if "⭐" in reason else "default"
                 print(f"  ✅ Match: {item['text']} | {reason}")
