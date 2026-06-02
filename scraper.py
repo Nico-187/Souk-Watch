@@ -58,8 +58,9 @@ SOUK_URLS = [
     ("https://www.parfumo.com/Souks/Offers/Samples",  "Proben"),
 ]
 
-LOGIN_URL  = "https://www.parfumo.com/board/login.php"
-BASE_URL   = "https://www.parfumo.com"
+# phpBB-Login-Formular (enthält die CSRF-Felder creation_time/form_token/sid)
+LOGIN_FORM_URL = "https://www.parfumo.com/board/ucp.php?mode=login"
+BASE_URL       = "https://www.parfumo.com"
 
 
 # ──────────────────────────────────────────────
@@ -134,38 +135,60 @@ def login(session: requests.Session) -> bool:
         print("[INFO] Kein Login konfiguriert – ohne Login scrapen.")
         return False
     try:
-        # Erst Startseite laden (Session-Cookie holen)
-        session.get(BASE_URL, timeout=15)
+        from urllib.parse import urljoin
 
-        # Echte Parfumo-Login-Felder (Board-Login /board/login.php)
-        payload = {
-            "username":  PARFUMO_USER,
-            "password":  PARFUMO_PASS,
-            "autologin": "1",
-            "login":     "Login",
-            "redirect":  "index.php",
-        }
-        r = session.post(LOGIN_URL, data=payload, timeout=15, allow_redirects=True)
+        # 1) Login-Formular laden → Session-Cookie + CSRF-Felder holen
+        form_page = session.get(LOGIN_FORM_URL, timeout=15)
+        soup = BeautifulSoup(form_page.text, "html.parser")
+
+        # Das Formular finden, dessen action auf den Login zeigt (ucp.php?mode=login)
+        form = None
+        for f in soup.find_all("form"):
+            if f.find("input", attrs={"name": "password"}):
+                form = f
+                break
+        if form is None:
+            print("[WARN] Login-Formular nicht gefunden – evtl. Bot-Schutz/Sperre. "
+                  "Es wird ohne Login weitergemacht.")
+            return False
+
+        # 2) ALLE Felder übernehmen (inkl. versteckter creation_time/form_token/sid)
+        payload = {}
+        for inp in form.find_all("input"):
+            name = inp.get("name")
+            if name:
+                payload[name] = inp.get("value", "")
+
+        # 3) Eigene Zugangsdaten einsetzen
+        payload["username"]  = PARFUMO_USER
+        payload["password"]  = PARFUMO_PASS
+        payload["autologin"] = "1"
+        payload.setdefault("login", "Login")
+
+        action = urljoin(LOGIN_FORM_URL, form.get("action") or LOGIN_FORM_URL)
+        r = session.post(action, data=payload, timeout=15, allow_redirects=True)
         if r.status_code >= 400:
             print(f"[WARN] Login-Request fehlgeschlagen (HTTP {r.status_code}).")
             return False
 
-        # Eindeutige Fehlermeldungen des Boards abfangen
+        # 4) Eindeutige Fehlermeldungen abfangen
         low = r.text.lower()
         if any(err in low for err in ["incorrect password", "ungültige", "ungueltige",
-                                      "wrong password", "not been able"]):
-            print("[WARN] Login fehlgeschlagen – Zugangsdaten falsch "
-                  "(PARFUMO_USER = Parfumo-Benutzername/E-Mail, PARFUMO_PASS = Passwort). "
+                                      "wrong password", "invalid username", "not been able"]):
+            print("[WARN] Login fehlgeschlagen – Benutzername/Passwort falsch. "
                   "Es wird ohne Login weitergemacht.")
             return False
 
-        # Erfolg verifizieren: frische Seite laden und auf Logout-Link prüfen
+        # 5) Erfolg verifizieren: Logout-Link vorhanden?
+        if is_logged_in(r.text):
+            print("[OK] Login erfolgreich.")
+            return True
         check = session.get(BASE_URL, timeout=15)
-        if is_logged_in(check.text) or is_logged_in(r.text):
+        if is_logged_in(check.text):
             print("[OK] Login erfolgreich.")
             return True
 
-        print("[WARN] Login nicht bestätigt (kein Logout-Link gefunden). "
+        print("[WARN] Login nicht bestätigt (kein Logout-Link). "
               "Prüfe PARFUMO_USER/PARFUMO_PASS. Es wird ohne Login weitergemacht.")
         return False
     except Exception as e:
