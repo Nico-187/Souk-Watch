@@ -465,8 +465,14 @@ def main():
 
     if seed_mode:
         print(f"[SEED] {len(matches)} aktuelle Treffer als bekannt markiert – KEINE Nachricht verschickt.")
-    else:
+    elif matches:
         notify_matches(matches)
+    else:
+        # Lebenszeichen: Lauf hat stattgefunden, aber nichts Neues gefunden
+        send_ntfy("Souk-Check",
+                  "Check erledigt – keine neuen Angebote.",
+                  "https://www.parfumo.com/Souks", priority="low")
+        print("[INFO] Keine neuen Treffer – Status-Nachricht verschickt.")
     save_seen_items(seen_items)
     print(f"[DONE] {new_count} neue Angebote verarbeitet, "
           f"{len(matches)} Treffer. Gesamt bekannt: {len(seen_items)}")

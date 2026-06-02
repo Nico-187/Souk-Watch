@@ -81,6 +81,8 @@ Treffer = Name **und** Art **und** Füllmenge ≥ min_fill **und** Preis ≤ max
 
 > **Benachrichtigung:** minimalistisch, ohne Emojis – Titel = Parfum, Text = `Füllmenge · Preis`
 > (oder „Preis unbekannt"). Mehrere Treffer eines Laufs kommen als **eine** gebündelte Nachricht.
+> Findet ein Lauf **nichts Neues**, kommt eine kurze Status-Nachricht „Check erledigt – keine
+> neuen Angebote" (leise, Priorität `low`), damit du weißt, dass der Check lief.
 
 ---
 
