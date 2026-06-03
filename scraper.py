@@ -513,22 +513,10 @@ def main():
 
 
 def notify_matches(matches: list):
-    """Verschickt Treffer: einzeln (1) oder als eine gebündelte Nachricht (mehrere)."""
-    if not matches:
-        return
-    if len(matches) == 1:
-        name, item = matches[0]
+    """Verschickt pro Treffer eine eigene Nachricht (jede einzeln anklickbar → direkt zum Angebot)."""
+    for name, item in matches:
         title, body = build_message(item, name)
         send_ntfy(title, body, item["url"])
-        return
-    # Mehrere Treffer in einem Lauf → eine kompakte Nachricht (kein Push-Flut)
-    lines = []
-    for name, item in matches:
-        _, body = build_message(item, name)
-        lines.append(f"{name} – {body}")
-    send_ntfy(f"Souk: {len(matches)} Treffer",
-              "\n".join(lines[:20]),
-              "https://www.parfumo.com/Souks")
 
 
 if __name__ == "__main__":
