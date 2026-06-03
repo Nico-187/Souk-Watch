@@ -2,10 +2,10 @@ name: Parfumo Souk Watcher
 
 on:
   schedule:
-    # Minute :17 statt :00 → außerhalb der GitHub-Stoßzeit = zuverlässiger
-    - cron: '17 6 * * *'   # 08:17 deutsche Zeit
-    - cron: '17 12 * * *'  # 14:17 deutsche Zeit
-    - cron: '17 18 * * *'  # 20:17 deutsche Zeit
+    # Minute :15 statt :00 → außerhalb der GitHub-Stoßzeit = zuverlässiger
+    - cron: '15 6 * * *'   # 08:15 deutsche Zeit
+    - cron: '15 12 * * *'  # 14:15 deutsche Zeit
+    - cron: '15 18 * * *'  # 20:15 deutsche Zeit
   workflow_dispatch:
     inputs:
       seed:
