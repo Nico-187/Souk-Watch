@@ -513,10 +513,11 @@ def main():
 
 
 def notify_matches(matches: list):
-    """Verschickt pro Treffer eine eigene Nachricht (jede einzeln anklickbar → direkt zum Angebot)."""
+    """Verschickt pro Treffer eine eigene Nachricht (anklickbar, hohe Priorität → sofortige
+    Zustellung auch bei geschlossener App / im Energiesparmodus)."""
     for name, item in matches:
         title, body = build_message(item, name)
-        send_ntfy(title, body, item["url"])
+        send_ntfy(title, body, item["url"], priority="high")
 
 
 if __name__ == "__main__":
