@@ -1,6 +1,6 @@
 # 🧴 Parfumo Souk Watcher
 
-Überwacht den Parfumo Souk automatisch 3× täglich und schickt dir Push-Nachrichten aufs iPhone (via Ntfy) bei passenden Angeboten.
+Überwacht den Parfumo Souk automatisch stündlich (6–22 Uhr) und schickt dir Push-Nachrichten aufs iPhone (via Ntfy) bei passenden Angeboten.
 
 **Kosten: 0 €** – läuft komplett auf GitHub Actions.
 
@@ -149,7 +149,7 @@ Lege diese **drei** Secrets an:
 - Links **Parfumo Souk Watcher** → **Run workflow** → grüner Button
 - Nach ~1 Min sollte der Lauf grün sein. Beim ersten Mal werden alle aktuellen Angebote als "bekannt" gespeichert; ab dann nur noch wirklich neue.
 
-**Fertig!** 🎉 Läuft automatisch um **8:00, 14:00 und 20:00 Uhr** (deutsche Zeit).
+**Fertig!** 🎉 Läuft automatisch **stündlich von ~6:15 bis 22:15 Uhr** (deutsche Zeit).
 
 ---
 
