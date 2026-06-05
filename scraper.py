@@ -30,8 +30,6 @@ NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "")  # z.B. "mein-parfumo-watcher-xyz1
 #   • "min_fill"  : Mindest-Füllmenge in %. 0 = egal.
 #   • "souk_url"  : (optional) direkte Souk-Seite des Parfums → zuverlässiger.
 WATCHLIST = [
-    {"name": "Pana Dora Oud Republic", "max_preis": 0, "art": "flakon", "min_fill": 95,
-     "souk_url": "https://www.parfumo.com/s_souk.php?b=pana-dora&p=oud-republic&img=1"},
     {"name": "Pana Dora Moonlight", "max_preis": 0, "art": "flakon", "min_fill": 95,
      "souk_url": "https://www.parfumo.com/s_souk.php?b=pana-dora&p=moonlight&img=1"},
     {"name": "Attar Collection Khaltat Night", "max_preis": 0, "art": "flakon", "min_fill": 95,
