@@ -1,0 +1,32 @@
+name: Souk Angebot analysieren
+
+on:
+  workflow_dispatch:
+    inputs:
+      item_urls:
+        description: 'Angebots-URLs (durch Leerzeichen getrennt). Leer = neueste der Watchlist'
+        required: false
+        default: ''
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Repository auschecken
+        uses: actions/checkout@v4
+
+      - name: Python einrichten
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Abhängigkeiten installieren
+        run: pip install -r requirements.txt
+
+      - name: Angebot analysieren
+        env:
+          PARFUMO_USER: ${{ secrets.PARFUMO_USER }}
+          PARFUMO_PASS: ${{ secrets.PARFUMO_PASS }}
+          ITEM_URLS:    ${{ github.event.inputs.item_urls }}
+        run: python debug_item.py
