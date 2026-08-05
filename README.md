@@ -64,7 +64,7 @@ python3 scraper.py
 Eintrag mit eigenem Preislimit, Art und Mindest-Füllmenge:
 ```python
 WATCHLIST = [
-    {"name": "Sospiro Il Padrino", "max_preis": 130, "art": "flakon", "min_fill": 90,
+    {"name": "Sospiro Il Padrino", "max_preis": 130, "art": "flakon", "min_fill": 90, "min_ml": 50,
      "souk_url": "https://www.parfumo.com/s_souk.php?b=sospiro&p=il-padrino&img=1"},
     # beliebig erweitern …
 ]
@@ -73,11 +73,16 @@ WATCHLIST = [
 - **max_preis**: Höchstpreis in €. `0` = Preis egal.
 - **art**: `"flakon"` · `"abfüllung"` · `"beides"`.
 - **min_fill**: Mindest-Füllmenge in % (z. B. `95`). `0` = egal.
+- **min_ml**: Mindest-Flakongröße in ml (hält 15-ml-Reisegrößen fern). `0` = egal.
 - **souk_url** *(optional)*: direkte Souk-Seite des Parfums → der Watcher findet es
   zuverlässiger. Schema: `s_souk.php?b=<marke>&p=<parfum>` (klein, mit Bindestrichen,
   wie in der Parfum-URL `/Parfums/<marke>/<parfum>`).
 
-Treffer = Name **und** Art **und** Füllmenge ≥ min_fill **und** Preis ≤ max_preis.
+Treffer = Name **und** Art **und** Füllmenge ≥ min_fill **und** Größe ≥ min_ml **und** Preis ≤ max_preis.
+
+> **Neue Flakons:** Parfumo zeigt bei ungeöffneter Ware kein Prozent-Feld, sondern nur
+> `Bottle size`. Der Watcher liest dort das Feld `Condition` – steht da `New`/`Neu`,
+> gilt der Flakon als 100 % voll.
 
 > **Benachrichtigung:** minimalistisch, ohne Emojis – Titel = Parfum, Text = `Füllmenge · Preis`
 > (oder „Preis unbekannt"). **Pro Treffer eine eigene Nachricht** (jede direkt anklickbar → zum Angebot).

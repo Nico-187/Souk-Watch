@@ -42,16 +42,23 @@ def neuestes_passendes(session, entry: dict):
             notizen.append(f"{kurz} → falsche Art ({item['art']})")
             continue
 
-        # Für den Test: Preis und Füllstand MÜSSEN lesbar sein
+        # Für den Test: Preis, Füllstand und Größe MÜSSEN lesbar sein
         if item.get("price") is None:
             notizen.append(f"{kurz} → Preis nicht lesbar")
             continue
         if item.get("fill_pct") is None:
             notizen.append(f"{kurz} → Füllstand nicht lesbar")
             continue
+        if item.get("size_ml") is None:
+            notizen.append(f"{kurz} → Flakongröße nicht lesbar")
+            continue
 
         if item["fill_pct"] < entry.get("min_fill", 0):
             notizen.append(f"{kurz} → nur {item['fill_pct']}% voll")
+            continue
+        min_ml = entry.get("min_ml", 0)
+        if min_ml > 0 and item["size_ml"] < min_ml:
+            notizen.append(f"{kurz} → nur {item['size_ml']:g} ml")
             continue
         limit = entry.get("max_preis", 0)
         if limit > 0 and item["price"] > limit:

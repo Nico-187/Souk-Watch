@@ -28,11 +28,12 @@ NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "")  # z.B. "mein-parfumo-watcher-xyz1
 #   • "max_preis" : Höchstpreis in €. 0 = Preis egal.
 #   • "art"       : "flakon" | "abfüllung" | "beides".
 #   • "min_fill"  : Mindest-Füllmenge in %. 0 = egal.
+#   • "min_ml"    : Mindest-Flakongröße in ml (hält Reisegrößen fern). 0 = egal.
 #   • "souk_url"  : (optional) direkte Souk-Seite des Parfums → zuverlässiger.
 WATCHLIST = [
-    {"name": "Sospiro Il Padrino", "max_preis": 130, "art": "flakon", "min_fill": 90,
+    {"name": "Sospiro Il Padrino", "max_preis": 130, "art": "flakon", "min_fill": 90, "min_ml": 50,
      "souk_url": "https://www.parfumo.com/s_souk.php?b=sospiro&p=il-padrino&img=1"},
-    {"name": "Attar Collection Khaltat Night", "max_preis": 60, "art": "flakon", "min_fill": 90,
+    {"name": "Attar Collection Khaltat Night", "max_preis": 60, "art": "flakon", "min_fill": 90, "min_ml": 50,
      "souk_url": "https://www.parfumo.com/s_souk.php?b=Attar_Collection&p=Khaltat_Night_Eau_de_Parfum&img=1"},
 ]
 
@@ -40,6 +41,8 @@ WATCHLIST = [
 NOTIFY_IF_PRICE_UNKNOWN = True
 # Füllmenge nicht lesbar → trotzdem melden? (True = nichts verpassen, Hinweis "unbekannt")
 NOTIFY_IF_FILL_UNKNOWN = True
+# Flakongröße nicht lesbar → trotzdem melden? (nur relevant wenn "min_ml" gesetzt ist)
+NOTIFY_IF_SIZE_UNKNOWN = True
 
 # Mit True werden ALLE neuen Angebote gemeldet (ignoriert die Watchlist). Normal: False
 NOTIFY_ALL_NEW = False
@@ -196,6 +199,36 @@ def parse_price_field(text: str) -> float | None:
     return parse_price(t)
 
 
+def parse_size_ml(text: str) -> float | None:
+    """
+    Flakongröße in ml aus den strukturierten Parfumo-Feldern.
+      • benutzt: "90 / 100 ml Current content"  → 100
+      • neu:     "15 ml Bottle size" / "15 ml Flakongröße" → 15
+    """
+    import re
+    t = text.replace("\xa0", " ")
+    m = re.search(r"(\d+(?:[.,]\d+)?)\s*/\s*(\d+(?:[.,]\d+)?)\s*ml", t)
+    if m:
+        return _num(m.group(2))
+    m = re.search(r"(\d+(?:[.,]\d+)?)\s*ml\s*(?:Bottle\s*size|Flakongr)", t, re.I)
+    if m:
+        return _num(m.group(1))
+    return None
+
+
+def parse_condition(text: str) -> str:
+    """
+    Zustand aus dem strukturierten Feld 'Condition'/'Zustand' → 'new' | 'used' | ''.
+    Bewusst NICHT über Freitext: das Parfumo-Menü enthält das Wort 'New'
+    ("All Perfumes New Top Trends") und würde jedes Angebot als neu ausweisen.
+    """
+    import re
+    m = re.search(r"(?:Condition|Zustand)\s+(New|Neu|Second\s*Hand|Gebraucht)", text, re.I)
+    if not m:
+        return ""
+    return "new" if m.group(1).lower() in ("new", "neu") else "used"
+
+
 def parse_fill_level(text: str) -> int | None:
     """
     Versucht den Füllstand aus dem Angebotstext zu lesen.
@@ -322,13 +355,25 @@ def fetch_item_details(session: requests.Session, item: dict) -> dict:
 
         # Strukturiertes Feld hat Vorrang vor Freitext-Erkennung
         item["fill_pct"] = fill_from_field if fill_from_field is not None else fill_from_ml
-        item["fill_source"] = "structured" if fill_from_field or fill_from_ml else "none"
+        item["fill_source"] = "structured" if item["fill_pct"] is not None else "none"
+
+        # ── Flakongröße und Zustand ────────────────────────────────────
+        item["size_ml"]   = parse_size_ml(full_text)
+        item["condition"] = parse_condition(full_text)
+
+        # Neue, ungeöffnete Flakons haben KEIN Prozent-Feld – dort zeigt
+        # Parfumo stattdessen nur "Bottle size". Zustand "New" = randvoll.
+        if item["fill_pct"] is None and item["condition"] == "new":
+            item["fill_pct"]    = 100
+            item["fill_source"] = "condition"
 
     except Exception as e:
         print(f"[WARN] Details für {item['id']} nicht ladbar: {e}")
         item["price"]       = None
         item["fill_pct"]    = None
         item["fill_source"] = "none"
+        item["size_ml"]     = None
+        item["condition"]   = ""
     return item
 
 
@@ -393,6 +438,16 @@ def _entry_check(item: dict, entry: dict) -> tuple[str | None, str]:
         elif fill_pct < min_fill:
             return None, ""  # zu wenig voll
 
+    # Flakongröße
+    size_ml = item.get("size_ml")
+    min_ml  = entry.get("min_ml", 0)
+    if min_ml > 0:
+        if size_ml is None:
+            if not NOTIFY_IF_SIZE_UNKNOWN:
+                return None, ""
+        elif size_ml < min_ml:
+            return None, ""  # zu kleiner Flakon (z.B. 15-ml-Reisegröße)
+
     # Preis
     price = item.get("price")
     limit = entry.get("max_preis", 0)
@@ -402,8 +457,9 @@ def _entry_check(item: dict, entry: dict) -> tuple[str | None, str]:
         return None, ""
 
     fill_str  = f"{fill_pct}%" if fill_pct is not None else "Füllmenge unbekannt"
+    size_str  = f"{size_ml:g} ml" if size_ml is not None else "Größe unbekannt"
     price_str = f"{price:.2f}€" if price is not None else "Preis unbekannt"
-    return entry["name"], f"{entry['name']} · {fill_str} · {price_str}"
+    return entry["name"], f"{entry['name']} · {fill_str} · {size_str} · {price_str}"
 
 
 def matches_filter(item: dict) -> tuple[str | None, str]:
@@ -421,12 +477,14 @@ def matches_filter(item: dict) -> tuple[str | None, str]:
 
 
 def build_message(item: dict, name: str) -> tuple[str, str]:
-    """Minimalistische ntfy-Nachricht: Parfum · Füllmenge · Preis – keine Emojis."""
+    """Minimalistische ntfy-Nachricht: Parfum · Füllmenge · Größe · Preis – keine Emojis."""
     fill      = item.get("fill_pct")
     fill_str  = f"{fill}% voll" if fill is not None else "Füllmenge unbekannt"
+    size      = item.get("size_ml")
+    size_str  = f"{size:g} ml" if size is not None else "Größe unbekannt"
     price     = item.get("price")
     price_str = f"{price:.2f} €".replace(".", ",") if price is not None else "Preis unbekannt"
-    return name, f"{fill_str} · {price_str}"
+    return name, f"{fill_str} · {size_str} · {price_str}"
 
 
 # ──────────────────────────────────────────────
