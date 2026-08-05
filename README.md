@@ -64,8 +64,8 @@ python3 scraper.py
 Eintrag mit eigenem Preislimit, Art und Mindest-Füllmenge:
 ```python
 WATCHLIST = [
-    {"name": "Pana Dora Oud Republic", "max_preis": 0, "art": "flakon", "min_fill": 95,
-     "souk_url": "https://www.parfumo.com/s_souk.php?b=pana-dora&p=oud-republic&img=1"},
+    {"name": "Sospiro Il Padrino", "max_preis": 130, "art": "flakon", "min_fill": 90,
+     "souk_url": "https://www.parfumo.com/s_souk.php?b=sospiro&p=il-padrino&img=1"},
     # beliebig erweitern …
 ]
 ```
@@ -81,8 +81,8 @@ Treffer = Name **und** Art **und** Füllmenge ≥ min_fill **und** Preis ≤ max
 
 > **Benachrichtigung:** minimalistisch, ohne Emojis – Titel = Parfum, Text = `Füllmenge · Preis`
 > (oder „Preis unbekannt"). **Pro Treffer eine eigene Nachricht** (jede direkt anklickbar → zum Angebot).
-> Findet ein Lauf **nichts Neues**, kommt eine kurze Status-Nachricht „Check erledigt – keine
-> neuen Angebote" (leise, Priorität `low`), damit du weißt, dass der Check lief.
+> Findet ein Lauf **nichts Neues**, kommt **keine** Nachricht – du hörst nur bei echten Treffern etwas.
+> Wieder einschalten: `NOTIFY_STATUS_WHEN_EMPTY = True` in `scraper.py`.
 
 ---
 

@@ -30,14 +30,10 @@ NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "")  # z.B. "mein-parfumo-watcher-xyz1
 #   • "min_fill"  : Mindest-Füllmenge in %. 0 = egal.
 #   • "souk_url"  : (optional) direkte Souk-Seite des Parfums → zuverlässiger.
 WATCHLIST = [
-    {"name": "Pana Dora Moonlight", "max_preis": 0, "art": "flakon", "min_fill": 95,
-     "souk_url": "https://www.parfumo.com/s_souk.php?b=pana-dora&p=moonlight&img=1"},
-    {"name": "Attar Collection Khaltat Night", "max_preis": 0, "art": "flakon", "min_fill": 95,
+    {"name": "Sospiro Il Padrino", "max_preis": 130, "art": "flakon", "min_fill": 90,
+     "souk_url": "https://www.parfumo.com/s_souk.php?b=sospiro&p=il-padrino&img=1"},
+    {"name": "Attar Collection Khaltat Night", "max_preis": 60, "art": "flakon", "min_fill": 90,
      "souk_url": "https://www.parfumo.com/s_souk.php?b=Attar_Collection&p=Khaltat_Night_Eau_de_Parfum&img=1"},
-    {"name": "House of Oud Dates Delight", "max_preis": 0, "art": "flakon", "min_fill": 95,
-     "souk_url": "https://www.parfumo.com/s_souk.php?b=The_House_of_Oud&p=Dates_Delight&img=1"},
-    {"name": "Ajwaa White Musk", "max_preis": 0, "art": "flakon", "min_fill": 95,
-     "souk_url": "https://www.parfumo.com/s_souk.php?b=ajwaa-perfumes&p=white-musk&img=1"},
 ]
 
 # Preis nicht lesbar → trotzdem melden? (Preis egal, daher True empfohlen)
@@ -47,6 +43,10 @@ NOTIFY_IF_FILL_UNKNOWN = True
 
 # Mit True werden ALLE neuen Angebote gemeldet (ignoriert die Watchlist). Normal: False
 NOTIFY_ALL_NEW = False
+
+# Status-Nachricht ("Check erledigt – keine neuen Angebote") bei leerem Lauf?
+# False = Push nur noch bei echten Treffern.
+NOTIFY_STATUS_WHEN_EMPTY = False
 
 # ──────────────────────────────────────────────
 #  DATEIPFADE
@@ -499,12 +499,14 @@ def main():
         print(f"[SEED] {len(matches)} aktuelle Treffer als bekannt markiert – KEINE Nachricht verschickt.")
     elif matches:
         notify_matches(matches)
-    else:
+    elif NOTIFY_STATUS_WHEN_EMPTY:
         # Lebenszeichen: Lauf hat stattgefunden, aber nichts Neues gefunden
         send_ntfy("Souk-Check",
                   "Check erledigt – keine neuen Angebote.",
                   "https://www.parfumo.com/Souks", priority="low")
         print("[INFO] Keine neuen Treffer – Status-Nachricht verschickt.")
+    else:
+        print("[INFO] Keine neuen Treffer – kein Push (Status-Nachrichten sind aus).")
     save_seen_items(seen_items)
     print(f"[DONE] {new_count} neue Angebote verarbeitet, "
           f"{len(matches)} Treffer. Gesamt bekannt: {len(seen_items)}")
